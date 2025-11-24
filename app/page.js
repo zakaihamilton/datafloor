@@ -20,7 +20,9 @@ import {
   ArrowUp,
   ArrowDown,
   ToggleLeft,
-  ToggleRight
+  ToggleRight,
+  Settings,
+  FileCog
 } from 'lucide-react';
 
 // -- EXTERNAL LIBRARIES VIA CDN INJECTION --
@@ -54,13 +56,19 @@ export default function DataFloor() {
   const [data, setData] = useState([]);
   const [columns, setColumns] = useState([]);
   const [fileName, setFileName] = useState("Untitled");
-  const [fileType, setFileType] = useState(null); // 'csv', 'parquet', 'json'
+  const [fileType, setFileType] = useState(null); // 'csv', 'parquet', 'json', 'custom'
   const [loading, setLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState("");
   const [error, setError] = useState(null);
   const [dragActive, setDragActive] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [showExportMenu, setShowExportMenu] = useState(false);
+  
+  // Import Configuration State
+  const [pendingFile, setPendingFile] = useState(null); // File waiting for config
+  const [importDelimiter, setImportDelimiter] = useState(""); // Default delimiter: "" (Auto)
+  const [customExtension, setCustomExtension] = useState(null); // Store original ext for export
+  const [forceCustomConfig, setForceCustomConfig] = useState(false); // Flag to bypass auto-detection
   
   // Feature Flags
   const [showEmptyStats, setShowEmptyStats] = useState(true);
@@ -98,18 +106,14 @@ export default function DataFloor() {
 
   // -- STATISTICS --
   const emptyCellCounts = useMemo(() => {
-    // Performance optimization: Skip calculation if feature is off
     if (!showEmptyStats) return {};
 
     const counts = {};
-    // Initialize counts
     columns.forEach(col => counts[col] = 0);
     
-    // Iterate through data to count empty values
     data.forEach(row => {
       columns.forEach(col => {
         const val = row[col];
-        // Check for null, undefined, or empty string
         if (val === null || val === undefined || val === '') {
           counts[col] = (counts[col] || 0) + 1;
         }
@@ -121,7 +125,6 @@ export default function DataFloor() {
   // -- APP ACTIONS --
 
   const resetApp = () => {
-    // Logic to return to the starting page
     setData([]);
     setColumns([]);
     setFileName("Untitled");
@@ -130,6 +133,10 @@ export default function DataFloor() {
     setCurrentPage(1);
     setSortConfig({ key: null, direction: 'asc' });
     setError(null);
+    setPendingFile(null);
+    setImportDelimiter(""); // Reset to Auto
+    setCustomExtension(null);
+    setForceCustomConfig(false);
   };
 
   const handleSort = (key) => {
@@ -140,9 +147,8 @@ export default function DataFloor() {
       if (sortConfig.direction === 'asc') {
         direction = 'desc';
       } else if (sortConfig.direction === 'desc') {
-        // Third click: remove sorting
         newKey = null;
-        direction = 'asc'; // Reset direction default
+        direction = 'asc'; 
       }
     }
     
@@ -153,34 +159,61 @@ export default function DataFloor() {
 
   const handleFileUpload = async (file) => {
     setLoading(true);
-    setLoadingMsg("Parsing file...");
     setError(null);
     setFileName(file.name);
     
-    try {
-      if (file.name.endsWith('.csv')) {
-        setFileType('csv');
-        parseCSV(file);
-      } else if (file.name.endsWith('.parquet')) {
-        setFileType('parquet');
-        await parseParquet(file);
-      } else if (file.name.endsWith('.json')) {
-        setFileType('json');
-        await parseJSON(file);
-      } else {
-        throw new Error("Unsupported file format. Please use .csv, .parquet, or .json");
-      }
-    } catch (err) {
-      setError(err.message);
-      setLoading(false);
+    const lowerName = file.name.toLowerCase();
+
+    // If forced custom config OR unknown extension, open modal
+    if (forceCustomConfig || (!lowerName.endsWith('.csv') && !lowerName.endsWith('.parquet') && !lowerName.endsWith('.json'))) {
+       setLoading(false);
+       setPendingFile(file);
+       setForceCustomConfig(false); // Reset flag
+       return;
+    }
+
+    // Standard Auto-Load Logic
+    if (lowerName.endsWith('.csv')) {
+      setLoadingMsg("Parsing CSV...");
+      setFileType('csv');
+      parseCSV(file);
+    } else if (lowerName.endsWith('.parquet')) {
+      setLoadingMsg("Parsing Parquet...");
+      setFileType('parquet');
+      await parseParquet(file);
+    } else if (lowerName.endsWith('.json')) {
+      setLoadingMsg("Parsing JSON...");
+      setFileType('json');
+      await parseJSON(file);
     }
   };
 
-  const parseCSV = (file) => {
+  // Triggered from the Import Config Modal
+  const processPendingFile = () => {
+    if (!pendingFile) return;
+    
+    setLoading(true);
+    setLoadingMsg("Parsing custom file...");
+    setPendingFile(null); // Close modal
+    
+    // Capture original extension for export
+    const match = pendingFile.name.match(/\.[^/.]+$/);
+    setCustomExtension(match ? match[0] : ".txt");
+    
+    setFileType('custom'); 
+    parseCSV(pendingFile, importDelimiter);
+  };
+
+  const parseCSV = (file, delimiter = "") => {
     if (!papaRef.current) return;
+    
+    // Handle escaped tab characters if user typed "\t"
+    const actualDelimiter = delimiter === "\\t" ? "\t" : delimiter;
+
     papaRef.current.parse(file, {
       header: true,
       skipEmptyLines: true,
+      delimiter: actualDelimiter, // Empty string = auto-detect
       complete: (results) => {
         if (results.data && results.data.length > 0) {
           setColumns(Object.keys(results.data[0]));
@@ -189,7 +222,7 @@ export default function DataFloor() {
         setLoading(false);
       },
       error: (err) => {
-        setError("Error parsing CSV: " + err.message);
+        setError("Error parsing file: " + err.message);
         setLoading(false);
       }
     });
@@ -314,6 +347,18 @@ export default function DataFloor() {
     setShowExportMenu(false);
   };
 
+  const exportCustom = () => {
+    if (!papaRef.current) return;
+    const actualDelimiter = importDelimiter === "\\t" ? "\t" : importDelimiter;
+    // Use the imported delimiter, fallback to comma if auto/empty
+    const finalDelimiter = actualDelimiter || ",";
+    
+    const csv = papaRef.current.unparse(data, { delimiter: finalDelimiter });
+    const exportName = fileName.replace(/\.[^/.]+$/, "") + "_exported" + (customExtension || ".txt");
+    downloadFile(csv, exportName, 'text/plain');
+    setShowExportMenu(false);
+  };
+
   const exportParquet = async () => {
     setShowExportMenu(false);
     setLoading(true);
@@ -406,7 +451,6 @@ export default function DataFloor() {
 
   // -- RENDER LOGIC --
 
-  // 1. Filter Data
   const filteredData = useMemo(() => {
     return data.filter(row => 
       Object.values(row).some(val => 
@@ -415,7 +459,6 @@ export default function DataFloor() {
     );
   }, [data, searchTerm]);
 
-  // 2. Sort Data
   const sortedData = useMemo(() => {
     let sortableItems = [...filteredData];
     if (sortConfig.key !== null) {
@@ -423,7 +466,6 @@ export default function DataFloor() {
         let aValue = a[sortConfig.key];
         let bValue = b[sortConfig.key];
 
-        // Try simple numeric detection
         const aNum = Number(aValue);
         const bNum = Number(bValue);
 
@@ -431,7 +473,6 @@ export default function DataFloor() {
             aValue = aNum;
             bValue = bNum;
         } else {
-            // Fallback to string comparison (case insensitive)
             aValue = String(aValue).toLowerCase();
             bValue = String(bValue).toLowerCase();
         }
@@ -529,6 +570,17 @@ export default function DataFloor() {
                        <div className="w-4 h-4 flex items-center justify-center font-mono text-[10px] border border-current rounded">{'{}'}</div>
                        JSON (.json)
                      </button>
+                     {/* CUSTOM EXPORT OPTION */}
+                     {fileType === 'custom' && (
+                       <button
+                         type="button"
+                         onClick={exportCustom}
+                         className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 hover:text-indigo-600 flex items-center gap-2 border-t border-slate-100"
+                       >
+                         <FileCog size={16} />
+                         Original ({customExtension})
+                       </button>
+                     )}
                    </div>
                  </>
                )}
@@ -540,6 +592,72 @@ export default function DataFloor() {
       {/* MAIN CONTENT */}
       <main className="flex-1 overflow-hidden relative">
         
+        {/* MODAL: Custom Import Config */}
+        {pendingFile && (
+          <div className="absolute inset-0 z-50 bg-white/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-md w-full p-6 animate-in fade-in zoom-in-95 duration-200">
+              <div className="flex items-center gap-3 mb-4 text-indigo-600">
+                <FileCog size={28} />
+                <h3 className="text-xl font-bold text-slate-900">Import Settings</h3>
+              </div>
+              
+              <div className="space-y-4">
+                <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                  <p className="text-xs text-slate-500 font-medium uppercase mb-1">Selected File</p>
+                  <p className="text-sm text-slate-800 font-semibold truncate">{pendingFile.name}</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Data Separator (Delimiter)
+                  </label>
+                  <p className="text-xs text-slate-500 mb-2">
+                    Specify how columns are separated in this file.
+                  </p>
+                  <div className="flex gap-2">
+                    <input 
+                      type="text" 
+                      value={importDelimiter}
+                      onChange={(e) => setImportDelimiter(e.target.value)}
+                      placeholder="e.g. , or ; or \t"
+                      className="flex-1 px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                    />
+                    <select 
+                      onChange={(e) => setImportDelimiter(e.target.value)}
+                      value={importDelimiter}
+                      className="px-3 py-2 border border-slate-300 rounded-md bg-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer"
+                    >
+                      <option value="">Auto</option>
+                      <option value=",">Comma (,)</option>
+                      <option value=";">Semicolon (;)</option>
+                      <option value="|">Pipe (|)</option>
+                      <option value="\t">Tab (\t)</option>
+                      <option value=" ">Space ( )</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex gap-3 mt-6">
+                  <button 
+                    type="button"
+                    onClick={() => { setPendingFile(null); setImportDelimiter(""); setForceCustomConfig(false); }}
+                    className="flex-1 px-4 py-2 bg-white border border-slate-300 text-slate-700 font-medium rounded-lg hover:bg-slate-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={processPendingFile}
+                    className="flex-1 px-4 py-2 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
+                  >
+                    Import Data
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* EMPTY STATE / DRAG DROP */}
         {data.length === 0 ? (
           <div 
@@ -574,20 +692,39 @@ export default function DataFloor() {
                   </div>
                 </div>
 
-                <div className="mt-6">
-                  <input 
-                    type="file" 
-                    id="file-upload" 
-                    className="hidden" 
-                    accept=".csv,.parquet,.json"
-                    onChange={(e) => e.target.files[0] && handleFileUpload(e.target.files[0])}
-                  />
-                  <label 
-                    htmlFor="file-upload"
-                    className="cursor-pointer inline-flex items-center gap-2 px-6 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold transition-transform active:scale-95"
+                <div className="mt-6 flex flex-col items-center gap-4">
+                  <div>
+                    <input 
+                      type="file" 
+                      id="file-upload" 
+                      className="hidden" 
+                      // accept=".csv,.parquet,.json" // Removed strictly to allow custom extensions
+                      onChange={(e) => e.target.files[0] && handleFileUpload(e.target.files[0])}
+                    />
+                    <label 
+                      htmlFor="file-upload"
+                      className="cursor-pointer inline-flex items-center gap-2 px-6 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold transition-transform active:scale-95 shadow-md"
+                    >
+                      Browse Files
+                    </label>
+                  </div>
+
+                  {/* Custom Import Button */}
+                  <button 
+                    type="button"
+                    onClick={() => {
+                        setForceCustomConfig(true);
+                        // Short timeout to let state update before triggering file dialog
+                        setTimeout(() => document.getElementById('file-upload').click(), 50);
+                    }}
+                    className="text-sm text-slate-500 hover:text-indigo-600 flex items-center gap-1 font-medium transition-colors"
                   >
-                    Browse Files
-                  </label>
+                    <Settings size={14} />
+                    Custom Import Options?
+                  </button>
+                  <p className="text-xs text-slate-400 max-w-xs">
+                    Tip: Select any file type. If the extension is unknown, you'll see options to configure delimiters.
+                  </p>
                 </div>
 
                 {error && (
