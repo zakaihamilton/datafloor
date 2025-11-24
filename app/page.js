@@ -22,7 +22,8 @@ import {
   ToggleLeft,
   ToggleRight,
   Settings,
-  FileCog
+  FileCog,
+  Calculator
 } from 'lucide-react';
 
 // -- EXTERNAL LIBRARIES VIA CDN INJECTION --
@@ -77,6 +78,10 @@ export default function DataFloor() {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(50);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
+  
+  // Hover State for Stats
+  const [hoveredColumn, setHoveredColumn] = useState(null);
+  const hoverTimeoutRef = useRef(null);
 
   // Libraries refs
   const papaRef = useRef(null);
@@ -122,6 +127,101 @@ export default function DataFloor() {
     return counts;
   }, [data, columns, showEmptyStats]);
 
+  // Dynamic Stats for Hovered Column (Mean, Median, Mode/Range)
+  const activeColumnStats = useMemo(() => {
+    if (!hoveredColumn || data.length === 0) return null;
+
+    const numericValues = [];
+    const dateValues = [];
+    
+    // Single pass extraction with type detection
+    for (const row of data) {
+      const val = row[hoveredColumn];
+      // Check if value exists
+      if (val !== null && val !== undefined && val !== '') {
+        // Try Numeric first
+        const num = Number(val);
+        if (!isNaN(num)) {
+          numericValues.push(num);
+        } else {
+            // If not a number, try Date
+            const dateTimestamp = Date.parse(val);
+            if (!isNaN(dateTimestamp)) {
+                dateValues.push(dateTimestamp);
+            }
+        }
+      }
+    }
+
+    // Determine column type based on majority
+    const isDateColumn = dateValues.length > numericValues.length;
+    const values = isDateColumn ? dateValues : numericValues;
+
+    if (values.length === 0) return null; // No analyzable data
+
+    // Mean Calculation
+    const sum = values.reduce((a, b) => a + b, 0);
+    const meanVal = sum / values.length;
+
+    // Median Calculation (Sort is required for Median and Min/Max)
+    values.sort((a, b) => a - b);
+    const mid = Math.floor(values.length / 2);
+    const medianVal = values.length % 2 !== 0 ? values[mid] : (values[mid - 1] + values[mid]) / 2;
+
+    // -- Type Specific Stats --
+    let modeLabel = null;
+    let minStr = null;
+    let maxStr = null;
+
+    if (isDateColumn) {
+        // Date: Calculate Oldest (Min) and Newest (Max)
+        const minVal = values[0];
+        const maxVal = values[values.length - 1];
+        minStr = new Date(minVal).toLocaleDateString();
+        maxStr = new Date(maxVal).toLocaleDateString();
+    } else {
+        // Numeric: Calculate Mode
+        const freq = {};
+        let maxFreq = 0;
+        for (const n of values) {
+            freq[n] = (freq[n] || 0) + 1;
+            if (freq[n] > maxFreq) maxFreq = freq[n];
+        }
+        
+        modeLabel = "None";
+        if (maxFreq > 1) {
+             const modes = Object.keys(freq).filter(k => freq[k] === maxFreq).map(Number);
+             // Limit display to 3 modes
+             if (modes.length > 3) {
+                 modeLabel = `${modes.slice(0, 3).map(v => v.toLocaleString(undefined, { maximumFractionDigits: 2 })).join(', ')}...`;
+             } else {
+                 modeLabel = modes.map(v => v.toLocaleString(undefined, { maximumFractionDigits: 2 })).join(', ');
+             }
+        }
+    }
+
+    // Format Mean/Median for display
+    let meanStr, medianStr;
+    if (isDateColumn) {
+        meanStr = new Date(meanVal).toLocaleDateString();
+        medianStr = new Date(medianVal).toLocaleDateString();
+    } else {
+        meanStr = meanVal.toLocaleString(undefined, { maximumFractionDigits: 2 });
+        medianStr = medianVal.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    }
+
+    return {
+      type: isDateColumn ? 'Date' : 'Numeric',
+      mean: meanStr,
+      median: medianStr,
+      mode: modeLabel,
+      min: minStr,
+      max: maxStr,
+      count: values.length
+    };
+
+  }, [data, hoveredColumn]);
+
   // -- APP ACTIONS --
 
   const resetApp = () => {
@@ -137,6 +237,8 @@ export default function DataFloor() {
     setImportDelimiter(""); // Reset to Auto
     setCustomExtension(null);
     setForceCustomConfig(false);
+    setHoveredColumn(null);
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
   };
 
   const handleSort = (key) => {
@@ -153,6 +255,22 @@ export default function DataFloor() {
     }
     
     setSortConfig({ key: newKey, direction });
+  };
+
+  const handleMouseEnterColumn = (col) => {
+    // Clear any existing timer to prevent race conditions
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    
+    // Set a delay before triggering the heavy calc / tooltip
+    hoverTimeoutRef.current = setTimeout(() => {
+      setHoveredColumn(col);
+    }, 1000);
+  };
+
+  const handleMouseLeaveColumn = () => {
+    // Cancel the timer immediately if user leaves before 1s
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    setHoveredColumn(null);
   };
 
   // -- FILE HANDLING --
@@ -797,7 +915,9 @@ export default function DataFloor() {
                             key={col} 
                             scope="col" 
                             onClick={() => handleSort(col)}
-                            className="px-6 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap bg-slate-50 border-r border-slate-200/60 cursor-pointer hover:bg-slate-100 transition-colors select-none"
+                            onMouseEnter={() => handleMouseEnterColumn(col)}
+                            onMouseLeave={handleMouseLeaveColumn}
+                            className="px-6 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap bg-slate-50 border-r border-slate-200/60 cursor-pointer hover:bg-slate-100 transition-colors select-none relative group"
                           >
                             <div className="flex flex-col gap-1">
                                 <div className="flex items-center gap-2">
@@ -815,6 +935,49 @@ export default function DataFloor() {
                                   </span>
                                 )}
                             </div>
+
+                            {/* STATS TOOLTIP */}
+                            {hoveredColumn === col && activeColumnStats && (
+                                <div className="absolute top-full left-0 mt-2 w-auto min-w-[12rem] max-w-sm bg-white p-3 rounded-lg shadow-xl border border-slate-200 z-50 text-left animate-in fade-in zoom-in-95 duration-100 pointer-events-none">
+                                    <div className="flex items-center gap-2 text-slate-500 mb-2">
+                                        <Calculator size={14} />
+                                        <h4 className="text-xs font-bold uppercase tracking-wider">
+                                            {activeColumnStats.type} Stats
+                                        </h4>
+                                    </div>
+                                    <div className="space-y-1.5 text-xs text-slate-700 whitespace-nowrap">
+                                        <div className="flex justify-between gap-4 border-b border-slate-100 pb-1">
+                                            <span>Count ({activeColumnStats.type}):</span> 
+                                            <span className="font-mono font-medium">{activeColumnStats.count}</span>
+                                        </div>
+                                        <div className="flex justify-between gap-4">
+                                            <span>Mean:</span> 
+                                            <span className="font-mono font-medium">{activeColumnStats.mean}</span>
+                                        </div>
+                                        <div className="flex justify-between gap-4">
+                                            <span>Median:</span> 
+                                            <span className="font-mono font-medium">{activeColumnStats.median}</span>
+                                        </div>
+                                        {activeColumnStats.type === 'Date' ? (
+                                            <>
+                                                <div className="flex justify-between gap-4">
+                                                    <span>Oldest:</span> 
+                                                    <span className="font-mono font-medium">{activeColumnStats.min}</span>
+                                                </div>
+                                                <div className="flex justify-between gap-4">
+                                                    <span>Newest:</span> 
+                                                    <span className="font-mono font-medium">{activeColumnStats.max}</span>
+                                                </div>
+                                            </>
+                                        ) : (
+                                            <div className="flex justify-between gap-4">
+                                                <span>Mode:</span> 
+                                                <span className="font-mono font-medium truncate max-w-[150px] text-right" title={activeColumnStats.mode}>{activeColumnStats.mode}</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
                           </th>
                         ))}
                       </tr>
