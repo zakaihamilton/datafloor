@@ -1,13 +1,13 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import {
-  FileSpreadsheet,
-  Upload,
-  Download,
-  Trash2,
-  Save,
-  FileType,
+import { 
+  FileSpreadsheet, 
+  Upload, 
+  Download, 
+  Trash2, 
+  Save, 
+  FileType, 
   AlertCircle,
   Database,
   ArrowRightLeft,
@@ -49,14 +49,14 @@ export default function DataFloor() {
   const [data, setData] = useState([]);
   const [columns, setColumns] = useState([]);
   const [fileName, setFileName] = useState("Untitled");
-  const [fileType, setFileType] = useState(null); // 'csv' or 'parquet'
+  const [fileType, setFileType] = useState(null); // 'csv', 'parquet', 'json'
   const [loading, setLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState("");
   const [error, setError] = useState(null);
   const [dragActive, setDragActive] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [showExportMenu, setShowExportMenu] = useState(false);
-
+  
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 50;
@@ -78,7 +78,7 @@ export default function DataFloor() {
         // Load HyParquet for Parquet Reading
         const hyparquet = await loadModule('https://cdn.jsdelivr.net/npm/hyparquet/+esm');
         hyparquetRef.current = hyparquet;
-
+        
       } catch (err) {
         console.error(err);
         setError("Failed to initialize data libraries. Please refresh.");
@@ -94,7 +94,7 @@ export default function DataFloor() {
     setLoadingMsg("Parsing file...");
     setError(null);
     setFileName(file.name);
-
+    
     try {
       if (file.name.endsWith('.csv')) {
         setFileType('csv');
@@ -102,8 +102,11 @@ export default function DataFloor() {
       } else if (file.name.endsWith('.parquet')) {
         setFileType('parquet');
         await parseParquet(file);
+      } else if (file.name.endsWith('.json')) {
+        setFileType('json');
+        await parseJSON(file);
       } else {
-        throw new Error("Unsupported file format. Please use .csv or .parquet");
+        throw new Error("Unsupported file format. Please use .csv, .parquet, or .json");
       }
     } catch (err) {
       setError(err.message);
@@ -130,6 +133,58 @@ export default function DataFloor() {
     });
   };
 
+  const parseJSON = async (file) => {
+    try {
+      const text = await file.text();
+      let jsonData;
+      try {
+        jsonData = JSON.parse(text);
+      } catch (e) {
+        throw new Error("Invalid JSON format. Please ensure file contains valid JSON.");
+      }
+
+      if (!Array.isArray(jsonData)) {
+        throw new Error("JSON file must contain an array of objects (e.g. [{}, {}]).");
+      }
+
+      if (jsonData.length > 0) {
+        // Scan first 100 rows to discover all potential columns (keys might be missing in some objects)
+        const allKeys = new Set();
+        const sampleSize = Math.min(jsonData.length, 100);
+        
+        for (let i = 0; i < sampleSize; i++) {
+          const row = jsonData[i];
+          if (row && typeof row === 'object') {
+            Object.keys(row).forEach(k => allKeys.add(k));
+          }
+        }
+        
+        const cols = Array.from(allKeys);
+        setColumns(cols);
+
+        // Sanitize rows
+        const sanitizedRows = jsonData.map(row => {
+           const newRow = {};
+           cols.forEach(col => {
+             let val = row[col];
+             if (typeof val === 'object' && val !== null) {
+               val = JSON.stringify(val);
+             }
+             // Ensure undefined/null values are empty strings for grid consistency
+             newRow[col] = (val === undefined || val === null) ? '' : val;
+           });
+           return newRow;
+        });
+
+        setData(sanitizedRows);
+      }
+      setLoading(false);
+    } catch (err) {
+      setError(err.message);
+      setLoading(false);
+    }
+  };
+
   const parseParquet = async (file) => {
     if (!hyparquetRef.current) {
       setError("Parquet library not loaded. Please refresh.");
@@ -139,7 +194,7 @@ export default function DataFloor() {
 
     try {
       const arrayBuffer = await file.arrayBuffer();
-
+      
       await hyparquetRef.current.parquetRead({
         file: arrayBuffer,
         rowFormat: 'object',
@@ -148,18 +203,18 @@ export default function DataFloor() {
             const firstRow = rows[0];
             const cols = Object.keys(firstRow);
             setColumns(cols);
-
+            
             // Sanitize rows
             const sanitizedRows = rows.map(row => {
-              const newRow = {};
-              cols.forEach(col => {
-                let val = row[col];
-                if (typeof val === 'object' && val !== null) {
-                  val = JSON.stringify(val);
-                }
-                newRow[col] = val;
-              });
-              return newRow;
+               const newRow = {};
+               cols.forEach(col => {
+                 let val = row[col];
+                 if (typeof val === 'object' && val !== null) {
+                   val = JSON.stringify(val);
+                 }
+                 newRow[col] = val;
+               });
+               return newRow;
             });
 
             setData(sanitizedRows);
@@ -209,9 +264,9 @@ export default function DataFloor() {
     try {
       // 1. Lazy load writer libraries
       if (!arrowRef.current) {
-        arrowRef.current = await loadModule('https://cdn.jsdelivr.net/npm/apache-arrow@13.0.0/+esm');
+         arrowRef.current = await loadModule('https://cdn.jsdelivr.net/npm/apache-arrow@13.0.0/+esm');
       }
-
+      
       if (!parquetWasmRef.current) {
         const wasmModule = await loadModule('https://cdn.jsdelivr.net/npm/parquet-wasm@0.6.1/esm/parquet_wasm.js');
         await wasmModule.default('https://cdn.jsdelivr.net/npm/parquet-wasm@0.6.1/esm/parquet_wasm_bg.wasm');
@@ -221,7 +276,7 @@ export default function DataFloor() {
       setLoadingMsg("Converting Data...");
       const Arrow = arrowRef.current;
       const Parquet = parquetWasmRef.current;
-
+      
       // 2. Build Arrow Table (JS Memory)
       const arrowColumns = {};
       columns.forEach(colName => {
@@ -253,18 +308,18 @@ export default function DataFloor() {
 
       // 6. Download
       downloadFile(parquetUint8Array, fileName.replace(/\.[^/.]+$/, "") + "_exported.parquet", 'application/vnd.apache.parquet');
-
+      
       setLoading(false);
 
     } catch (err) {
       console.error("Parquet Export Failed:", err);
-
+      
       const useJson = window.confirm(
-        "Parquet export failed.\n\n" +
+        "Parquet export failed.\n\n" + 
         "Error: " + err.message + "\n\n" +
         "Download as JSON instead?"
       );
-
+      
       if (useJson) {
         const jsonStr = JSON.stringify(data, null, 2);
         downloadFile(jsonStr, fileName.replace(/\.[^/.]+$/, "") + "_exported.json", 'application/json');
@@ -305,8 +360,8 @@ export default function DataFloor() {
 
   // -- RENDER LOGIC --
 
-  const filteredData = data.filter(row =>
-    Object.values(row).some(val =>
+  const filteredData = data.filter(row => 
+    Object.values(row).some(val => 
       String(val).toLowerCase().includes(searchTerm.toLowerCase())
     )
   );
@@ -319,7 +374,7 @@ export default function DataFloor() {
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-800 font-sans">
-
+      
       {/* HEADER */}
       <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between shadow-sm z-20 relative">
         <div className="flex items-center gap-3">
@@ -334,66 +389,66 @@ export default function DataFloor() {
 
         {data.length > 0 && (
           <div className="flex items-center gap-4">
-            <div className="hidden md:flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-full border border-slate-200">
-              <FileType size={14} className="text-slate-500" />
-              <span className="text-sm font-semibold text-slate-700">{fileType ? fileType.toUpperCase() : 'UNKNOWN'}</span>
-              <span className="text-slate-300">|</span>
-              <span className="text-sm text-slate-500">{data.length.toLocaleString()} rows</span>
-            </div>
+             <div className="hidden md:flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-full border border-slate-200">
+                <FileType size={14} className="text-slate-500"/>
+                <span className="text-sm font-semibold text-slate-700">{fileType ? fileType.toUpperCase() : 'UNKNOWN'}</span>
+                <span className="text-slate-300">|</span>
+                <span className="text-sm text-slate-500">{data.length.toLocaleString()} rows</span>
+             </div>
+             
+             <div className="h-6 w-px bg-slate-200 mx-2"></div>
 
-            <div className="h-6 w-px bg-slate-200 mx-2"></div>
+             {/* Export Dropdown */}
+             <div className="relative">
+               <button 
+                 onClick={() => setShowExportMenu(!showExportMenu)}
+                 disabled={loading}
+                 className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm font-medium transition-colors shadow-sm disabled:opacity-50"
+               >
+                 <Download size={16} />
+                 Export
+                 <ChevronDown size={16} />
+               </button>
 
-            {/* Export Dropdown */}
-            <div className="relative">
-              <button
-                onClick={() => setShowExportMenu(!showExportMenu)}
-                disabled={loading}
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm font-medium transition-colors shadow-sm disabled:opacity-50"
-              >
-                <Download size={16} />
-                Export
-                <ChevronDown size={16} />
-              </button>
-
-              {showExportMenu && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowExportMenu(false)}></div>
-                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 border border-slate-200 z-50 animate-in fade-in zoom-in-95 duration-100">
-                    <button
-                      onClick={exportCSV}
-                      className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 hover:text-indigo-600 flex items-center gap-2"
-                    >
-                      <FileSpreadsheet size={16} />
-                      CSV (.csv)
-                    </button>
-                    <button
-                      onClick={exportParquet}
-                      className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 hover:text-indigo-600 flex items-center gap-2"
-                    >
-                      <ArrowRightLeft size={16} />
-                      Parquet (.parquet)
-                    </button>
-                    <button
-                      onClick={exportJSON}
-                      className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 hover:text-indigo-600 flex items-center gap-2"
-                    >
-                      <div className="w-4 h-4 flex items-center justify-center font-mono text-[10px] border border-current rounded">{'{}'}</div>
-                      JSON (.json)
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
+               {showExportMenu && (
+                 <>
+                   <div className="fixed inset-0 z-40" onClick={() => setShowExportMenu(false)}></div>
+                   <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 border border-slate-200 z-50 animate-in fade-in zoom-in-95 duration-100">
+                     <button
+                       onClick={exportCSV}
+                       className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 hover:text-indigo-600 flex items-center gap-2"
+                     >
+                       <FileSpreadsheet size={16} />
+                       CSV (.csv)
+                     </button>
+                     <button
+                       onClick={exportParquet}
+                       className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 hover:text-indigo-600 flex items-center gap-2"
+                     >
+                       <ArrowRightLeft size={16} />
+                       Parquet (.parquet)
+                     </button>
+                     <button
+                       onClick={exportJSON}
+                       className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 hover:text-indigo-600 flex items-center gap-2"
+                     >
+                       <div className="w-4 h-4 flex items-center justify-center font-mono text-[10px] border border-current rounded">{'{}'}</div>
+                       JSON (.json)
+                     </button>
+                   </div>
+                 </>
+               )}
+             </div>
           </div>
         )}
       </header>
 
       {/* MAIN CONTENT */}
       <main className="flex-1 overflow-hidden relative">
-
+        
         {/* EMPTY STATE / DRAG DROP */}
         {data.length === 0 ? (
-          <div
+          <div 
             className={`h-full flex flex-col items-center justify-center p-8 transition-colors ${dragActive ? 'bg-indigo-50/50' : ''}`}
             onDragEnter={handleDrag}
             onDragLeave={handleDrag}
@@ -413,9 +468,9 @@ export default function DataFloor() {
                 </div>
                 <h2 className="text-2xl font-bold text-slate-900 mb-2">Drop your data here</h2>
                 <p className="text-slate-500 mb-8">
-                  Support for <span className="font-mono text-indigo-600 bg-indigo-50 px-1 rounded">.csv</span> and <span className="font-mono text-indigo-600 bg-indigo-50 px-1 rounded">.parquet</span> files.
+                  Support for <span className="font-mono text-indigo-600 bg-indigo-50 px-1 rounded">.csv</span>, <span className="font-mono text-indigo-600 bg-indigo-50 px-1 rounded">.parquet</span>, and <span className="font-mono text-indigo-600 bg-indigo-50 px-1 rounded">.json</span> files.
                 </p>
-
+                
                 <div className="relative">
                   <div className="absolute inset-0 flex items-center">
                     <div className="w-full border-t border-slate-200"></div>
@@ -426,14 +481,14 @@ export default function DataFloor() {
                 </div>
 
                 <div className="mt-6">
-                  <input
-                    type="file"
-                    id="file-upload"
-                    className="hidden"
-                    accept=".csv,.parquet"
+                  <input 
+                    type="file" 
+                    id="file-upload" 
+                    className="hidden" 
+                    accept=".csv,.parquet,.json"
                     onChange={(e) => e.target.files[0] && handleFileUpload(e.target.files[0])}
                   />
-                  <label
+                  <label 
                     htmlFor="file-upload"
                     className="cursor-pointer inline-flex items-center gap-2 px-6 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold transition-transform active:scale-95"
                   >
@@ -453,46 +508,46 @@ export default function DataFloor() {
         ) : (
           /* DATA GRID VIEW */
           <div className="h-full flex flex-col">
-
+            
             {/* OVERLAY LOADING SPINNER (FOR EXPORTS) */}
             {loading && (
               <div className="absolute inset-0 z-50 bg-white/80 backdrop-blur-sm flex items-center justify-center flex-col">
-                <div className="h-12 w-12 rounded-full border-4 border-indigo-200 border-t-indigo-600 animate-spin mb-4"></div>
-                <p className="text-lg font-bold text-slate-800">{loadingMsg}</p>
+                 <div className="h-12 w-12 rounded-full border-4 border-indigo-200 border-t-indigo-600 animate-spin mb-4"></div>
+                 <p className="text-lg font-bold text-slate-800">{loadingMsg}</p>
               </div>
             )}
 
             {/* TOOLBAR */}
             <div className="bg-white border-b border-slate-200 p-4 flex items-center justify-between gap-4">
-              <div className="relative flex-1 max-w-md">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                <input
-                  type="text"
-                  placeholder="Search data..."
-                  value={searchTerm}
-                  onChange={(e) => {
-                    setSearchTerm(e.target.value);
-                    setCurrentPage(1);
-                  }}
-                  className="w-full pl-10 pr-4 py-2 rounded-md border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm"
-                />
-              </div>
+               <div className="relative flex-1 max-w-md">
+                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                 <input 
+                   type="text" 
+                   placeholder="Search data..." 
+                   value={searchTerm}
+                   onChange={(e) => {
+                     setSearchTerm(e.target.value);
+                     setCurrentPage(1);
+                   }}
+                   className="w-full pl-10 pr-4 py-2 rounded-md border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm"
+                 />
+               </div>
 
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => {
-                    setData([]);
-                    setColumns([]);
-                    setFileName("Untitled");
-                    setFileType(null);
-                    setSearchTerm("");
-                  }}
-                  className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                  title="Clear Data"
-                >
-                  <Trash2 size={18} />
-                </button>
-              </div>
+               <div className="flex items-center gap-2">
+                 <button 
+                   onClick={() => {
+                     setData([]);
+                     setColumns([]);
+                     setFileName("Untitled");
+                     setFileType(null);
+                     setSearchTerm("");
+                   }}
+                   className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                   title="Clear Data"
+                 >
+                   <Trash2 size={18} />
+                 </button>
+               </div>
             </div>
 
             {/* TABLE CONTAINER */}
@@ -506,9 +561,9 @@ export default function DataFloor() {
                           #
                         </th>
                         {columns.map((col) => (
-                          <th
-                            key={col}
-                            scope="col"
+                          <th 
+                            key={col} 
+                            scope="col" 
                             className="px-6 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap bg-slate-50 border-r border-slate-200/60"
                           >
                             <div className="flex items-center gap-2">
@@ -527,8 +582,8 @@ export default function DataFloor() {
                               {globalIndex}
                             </td>
                             {columns.map((col, cIdx) => (
-                              <td
-                                key={`${rIdx}-${cIdx}`}
+                              <td 
+                                key={`${rIdx}-${cIdx}`} 
                                 className="px-0 py-0 whitespace-nowrap border-r border-slate-100 min-w-[150px] relative"
                               >
                                 <input
@@ -545,7 +600,7 @@ export default function DataFloor() {
                       {currentRows.length === 0 && (
                         <tr>
                           <td colSpan={columns.length + 1} className="px-6 py-12 text-center text-slate-400">
-                            No matching records found.
+                             No matching records found.
                           </td>
                         </tr>
                       )}
@@ -557,28 +612,28 @@ export default function DataFloor() {
 
             {/* PAGINATION */}
             <div className="bg-white border-t border-slate-200 p-3 flex items-center justify-between shadow-lg z-10">
-              <div className="text-sm text-slate-500">
-                Showing <span className="font-medium text-slate-900">{((currentPage - 1) * rowsPerPage) + 1}</span> to <span className="font-medium text-slate-900">{Math.min(currentPage * rowsPerPage, filteredData.length)}</span> of <span className="font-medium text-slate-900">{filteredData.length}</span> results
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                  disabled={currentPage === 1}
-                  className="p-1.5 rounded-md hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed text-slate-600 transition-colors"
-                >
-                  <ChevronLeft size={18} />
-                </button>
-                <span className="text-sm font-medium text-slate-700 px-2">
-                  Page {currentPage} of {Math.max(totalPages, 1)}
-                </span>
-                <button
-                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                  disabled={currentPage === totalPages || totalPages === 0}
-                  className="p-1.5 rounded-md hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed text-slate-600 transition-colors"
-                >
-                  <ChevronRight size={18} />
-                </button>
-              </div>
+               <div className="text-sm text-slate-500">
+                 Showing <span className="font-medium text-slate-900">{((currentPage - 1) * rowsPerPage) + 1}</span> to <span className="font-medium text-slate-900">{Math.min(currentPage * rowsPerPage, filteredData.length)}</span> of <span className="font-medium text-slate-900">{filteredData.length}</span> results
+               </div>
+               <div className="flex items-center gap-2">
+                 <button 
+                   onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                   disabled={currentPage === 1}
+                   className="p-1.5 rounded-md hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed text-slate-600 transition-colors"
+                 >
+                   <ChevronLeft size={18} />
+                 </button>
+                 <span className="text-sm font-medium text-slate-700 px-2">
+                   Page {currentPage} of {Math.max(totalPages, 1)}
+                 </span>
+                 <button 
+                   onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                   disabled={currentPage === totalPages || totalPages === 0}
+                   className="p-1.5 rounded-md hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed text-slate-600 transition-colors"
+                 >
+                   <ChevronRight size={18} />
+                 </button>
+               </div>
             </div>
           </div>
         )}
@@ -586,13 +641,13 @@ export default function DataFloor() {
 
       {/* FOOTER INFO */}
       {data.length === 0 && (
-        <footer className="bg-slate-50 py-6 text-center text-slate-400 text-sm">
-          <div className="flex items-center justify-center gap-2 mb-1">
-            <Info size={14} />
-            <span>Data stays in your browser. No server uploads.</span>
-          </div>
-          Powered by PapaParse & HyParquet
-        </footer>
+         <footer className="bg-slate-50 py-6 text-center text-slate-400 text-sm">
+           <div className="flex items-center justify-center gap-2 mb-1">
+             <Info size={14} />
+             <span>Data stays in your browser. No server uploads.</span>
+           </div>
+           Powered by PapaParse & HyParquet
+         </footer>
       )}
     </div>
   );
