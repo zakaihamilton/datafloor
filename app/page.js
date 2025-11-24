@@ -16,7 +16,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
-  Info
+  Info,
+  FileText
 } from 'lucide-react';
 
 // -- EXTERNAL LIBRARIES VIA CDN INJECTION --
@@ -393,7 +394,9 @@ export default function DataFloor() {
         {data.length > 0 && (
           <div className="flex items-center gap-4">
              <div className="hidden md:flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-full border border-slate-200">
-                <FileType size={14} className="text-slate-500"/>
+                <FileText size={14} className="text-slate-500"/>
+                <span className="text-sm font-semibold text-slate-900 max-w-[200px] truncate" title={fileName}>{fileName}</span>
+                <span className="text-slate-300">|</span>
                 <span className="text-sm font-semibold text-slate-700">{fileType ? fileType.toUpperCase() : 'UNKNOWN'}</span>
                 <span className="text-slate-300">|</span>
                 <span className="text-sm text-slate-500">{data.length.toLocaleString()} rows</span>
