@@ -93,6 +93,25 @@ export default function DataFloor() {
     init();
   }, []);
 
+  // -- STATISTICS --
+  const emptyCellCounts = useMemo(() => {
+    const counts = {};
+    // Initialize counts
+    columns.forEach(col => counts[col] = 0);
+    
+    // Iterate through data to count empty values
+    data.forEach(row => {
+      columns.forEach(col => {
+        const val = row[col];
+        // Check for null, undefined, or empty string
+        if (val === null || val === undefined || val === '') {
+          counts[col] = (counts[col] || 0) + 1;
+        }
+      });
+    });
+    return counts;
+  }, [data, columns]);
+
   // -- APP ACTIONS --
 
   const resetApp = () => {
@@ -633,13 +652,20 @@ export default function DataFloor() {
                             onClick={() => handleSort(col)}
                             className="px-6 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap bg-slate-50 border-r border-slate-200/60 cursor-pointer hover:bg-slate-100 transition-colors select-none"
                           >
-                            <div className="flex items-center gap-2">
-                              {col}
-                              {sortConfig.key === col && (
-                                sortConfig.direction === 'asc' 
-                                  ? <ArrowUp size={14} className="text-indigo-600" />
-                                  : <ArrowDown size={14} className="text-indigo-600" />
-                              )}
+                            <div className="flex flex-col gap-1">
+                                <div className="flex items-center gap-2">
+                                  {col}
+                                  {sortConfig.key === col && (
+                                    sortConfig.direction === 'asc' 
+                                      ? <ArrowUp size={14} className="text-indigo-600" />
+                                      : <ArrowDown size={14} className="text-indigo-600" />
+                                  )}
+                                </div>
+                                {emptyCellCounts[col] > 0 && (
+                                    <span className="inline-flex items-center self-start px-1.5 py-0.5 rounded text-[11px] font-medium bg-red-50 text-red-700 border border-red-100">
+                                        {emptyCellCounts[col]} empty
+                                    </span>
+                                )}
                             </div>
                           </th>
                         ))}
