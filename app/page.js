@@ -21,7 +21,9 @@ import {
   Info,
   FileText,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  ToggleLeft,
+  ToggleRight
 } from 'lucide-react';
 
 // -- EXTERNAL LIBRARIES VIA CDN INJECTION --
@@ -62,6 +64,9 @@ export default function DataFloor() {
   const [searchTerm, setSearchTerm] = useState("");
   const [showExportMenu, setShowExportMenu] = useState(false);
   
+  // Feature Flags
+  const [showEmptyStats, setShowEmptyStats] = useState(true);
+  
   // Pagination & Sort State
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(50);
@@ -95,6 +100,9 @@ export default function DataFloor() {
 
   // -- STATISTICS --
   const emptyCellCounts = useMemo(() => {
+    // Performance optimization: Skip calculation if feature is off
+    if (!showEmptyStats) return {};
+
     const counts = {};
     // Initialize counts
     columns.forEach(col => counts[col] = 0);
@@ -110,7 +118,7 @@ export default function DataFloor() {
       });
     });
     return counts;
-  }, [data, columns]);
+  }, [data, columns, showEmptyStats]);
 
   // -- APP ACTIONS --
 
@@ -630,8 +638,19 @@ export default function DataFloor() {
                  />
                </div>
 
-               <div className="flex items-center gap-2">
-                 {/* Trash Icon Removed */}
+               <div className="flex items-center gap-3">
+                 {/* Highlight Empty Cells Toggle */}
+                 <button 
+                   onClick={() => setShowEmptyStats(!showEmptyStats)}
+                   className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors 
+                     ${showEmptyStats 
+                       ? 'bg-red-50 border-red-200 text-red-700 hover:bg-red-100' 
+                       : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}
+                   title="Toggle empty cell highlighting"
+                 >
+                   {showEmptyStats ? <ToggleRight size={18} className="text-red-600" /> : <ToggleLeft size={18} />}
+                   <span className="hidden sm:inline">Highlight Empty</span>
+                 </button>
                </div>
             </div>
 
@@ -661,9 +680,12 @@ export default function DataFloor() {
                                       : <ArrowDown size={14} className="text-indigo-600" />
                                   )}
                                 </div>
-                                <span className={`inline-flex items-center self-start px-1.5 py-0.5 rounded text-[11px] font-medium bg-red-50 text-red-700 border border-red-100 transition-opacity ${emptyCellCounts[col] > 0 ? 'opacity-100' : 'opacity-0'}`}>
-                                    {emptyCellCounts[col] > 0 ? emptyCellCounts[col] : 0} empty
-                                </span>
+                                {/* Conditional rendering of empty stats based on toggle */}
+                                {showEmptyStats && (
+                                  <span className={`inline-flex items-center self-start px-1.5 py-0.5 rounded text-[11px] font-medium bg-red-50 text-red-700 border border-red-100 transition-opacity ${emptyCellCounts[col] > 0 ? 'opacity-100' : 'opacity-0'}`}>
+                                      {emptyCellCounts[col] > 0 ? emptyCellCounts[col] : 0} empty
+                                  </span>
+                                )}
                             </div>
                           </th>
                         ))}
@@ -678,31 +700,39 @@ export default function DataFloor() {
                             <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-400 font-mono bg-slate-50/50 border-r border-slate-100">
                               {globalIndex + 1}
                             </td>
-                            {columns.map((col, cIdx) => (
-                              <td 
-                                key={`${rIdx}-${cIdx}`} 
-                                className="px-0 py-0 whitespace-nowrap border-r border-slate-100 min-w-[150px] relative"
-                              >
-                                <input
-                                  type="text"
-                                  className="w-full h-full px-6 py-3 bg-transparent border-none focus:ring-2 focus:ring-indigo-500 focus:bg-white text-sm text-slate-700 outline-none truncate"
-                                  value={row[col] || ''}
-                                  // Updating logic needs to find original index in 'data' array
-                                  // For simplicity in this demo, we update filtered/sorted view,
-                                  // but a real app would need a stable ID to map back to 'data'.
-                                  // Here we search 'data' for the object reference.
-                                  onChange={(e) => {
-                                      const newValue = e.target.value;
-                                      const rowIndexInData = data.indexOf(row);
-                                      if (rowIndexInData > -1) {
-                                          const newData = [...data];
-                                          newData[rowIndexInData] = { ...newData[rowIndexInData], [col]: newValue };
-                                          setData(newData);
-                                      }
-                                  }}
-                                />
-                              </td>
-                            ))}
+                            {columns.map((col, cIdx) => {
+                              const cellValue = row[col];
+                              // Only calculate empty status if toggle is ON
+                              const isEmpty = showEmptyStats && (cellValue === null || cellValue === undefined || cellValue === '');
+
+                              return (
+                                <td 
+                                  key={`${rIdx}-${cIdx}`} 
+                                  className="px-0 py-0 whitespace-nowrap border-r border-slate-100 min-w-[150px] relative"
+                                >
+                                  <input
+                                    type="text"
+                                    className={`w-full h-full px-6 py-3 text-sm text-slate-700 outline-none truncate transition-colors
+                                      ${isEmpty ? 'bg-red-100/50' : 'bg-transparent'} 
+                                      focus:bg-white focus:ring-2 focus:ring-inset focus:ring-indigo-500`}
+                                    value={cellValue || ''}
+                                    // Updating logic needs to find original index in 'data' array
+                                    // For simplicity in this demo, we update filtered/sorted view,
+                                    // but a real app would need a stable ID to map back to 'data'.
+                                    // Here we search 'data' for the object reference.
+                                    onChange={(e) => {
+                                        const newValue = e.target.value;
+                                        const rowIndexInData = data.indexOf(row);
+                                        if (rowIndexInData > -1) {
+                                            const newData = [...data];
+                                            newData[rowIndexInData] = { ...newData[rowIndexInData], [col]: newValue };
+                                            setData(newData);
+                                        }
+                                    }}
+                                  />
+                                </td>
+                              );
+                            })}
                           </tr>
                         );
                       })}
