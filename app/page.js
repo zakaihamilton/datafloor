@@ -383,7 +383,7 @@ export default function DataFloor() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-slate-900 tracking-tight">DataFloor</h1>
-            <p className="text-xs text-slate-500 font-medium">Parquet ⇄ CSV Converter & Editor</p>
+            <p className="text-xs text-slate-500 font-medium">Parquet, JSON and CSV Converter & Editor</p>
           </div>
         </div>
 
