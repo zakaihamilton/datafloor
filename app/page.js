@@ -369,21 +369,23 @@ export default function DataFloor() {
     currentPage * rowsPerPage
   );
 
+  const isHome = data.length === 0;
+
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-800 font-sans">
       
       {/* HEADER */}
       <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between shadow-sm z-20 relative">
         <div 
-          className="flex items-center gap-3 cursor-pointer group transition-transform active:scale-95"
-          onClick={resetApp}
-          title="Return to Home"
+          className={`flex items-center gap-3 ${!isHome ? "cursor-pointer group transition-transform active:scale-95" : ""}`}
+          onClick={!isHome ? resetApp : undefined}
+          title={!isHome ? "Return to Home" : ""}
         >
-          <div className="bg-indigo-600 p-2 rounded-lg text-white group-hover:bg-indigo-700 transition-colors">
+          <div className={`bg-indigo-600 p-2 rounded-lg text-white ${!isHome ? "group-hover:bg-indigo-700" : ""} transition-colors`}>
             <Database size={24} />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-slate-900 tracking-tight group-hover:text-indigo-600 transition-colors">DataFloor</h1>
+            <h1 className={`text-xl font-bold text-slate-900 tracking-tight ${!isHome ? "group-hover:text-indigo-600" : ""} transition-colors`}>DataFloor</h1>
             <p className="text-xs text-slate-500 font-medium">Parquet, JSON and CSV Converter & Editor</p>
           </div>
         </div>
