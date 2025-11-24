@@ -23,7 +23,9 @@ import {
   ToggleRight,
   Settings,
   FileCog,
-  Calculator
+  Calculator,
+  Copy,
+  Check
 } from 'lucide-react';
 
 // -- EXTERNAL LIBRARIES VIA CDN INJECTION --
@@ -81,7 +83,9 @@ export default function DataFloor() {
   
   // Hover State for Stats
   const [hoveredColumn, setHoveredColumn] = useState(null);
+  const [copiedColumn, setCopiedColumn] = useState(null); // To show "Check" icon
   const hoverTimeoutRef = useRef(null);
+  const leaveTimeoutRef = useRef(null); // Grace period for moving to tooltip
 
   // Libraries refs
   const papaRef = useRef(null);
@@ -211,6 +215,7 @@ export default function DataFloor() {
     }
 
     return {
+      columnName: hoveredColumn,
       type: isDateColumn ? 'Date' : 'Numeric',
       mean: meanStr,
       median: medianStr,
@@ -239,6 +244,7 @@ export default function DataFloor() {
     setForceCustomConfig(false);
     setHoveredColumn(null);
     if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    if (leaveTimeoutRef.current) clearTimeout(leaveTimeoutRef.current);
   };
 
   const handleSort = (key) => {
@@ -258,9 +264,18 @@ export default function DataFloor() {
   };
 
   const handleMouseEnterColumn = (col) => {
-    // Clear any existing timer to prevent race conditions
+    // Clear any pending leave action (grace period)
+    if (leaveTimeoutRef.current) {
+      clearTimeout(leaveTimeoutRef.current);
+      leaveTimeoutRef.current = null;
+    }
+    
+    // Clear pending enter action if switching columns quickly
     if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
     
+    // If already hovering this column, do nothing (stays open)
+    if (hoveredColumn === col) return;
+
     // Set a delay before triggering the heavy calc / tooltip
     hoverTimeoutRef.current = setTimeout(() => {
       setHoveredColumn(col);
@@ -268,9 +283,49 @@ export default function DataFloor() {
   };
 
   const handleMouseLeaveColumn = () => {
-    // Cancel the timer immediately if user leaves before 1s
+    // Clear the enter timer so we don't open if we just left quickly
     if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-    setHoveredColumn(null);
+
+    // Set a grace period before closing.
+    // This allows the user to move their mouse from the header text TO the tooltip
+    // without the tooltip disappearing instantly due to the gap.
+    leaveTimeoutRef.current = setTimeout(() => {
+        setHoveredColumn(null);
+        setCopiedColumn(null); // Reset copy feedback when tooltip closes
+    }, 300);
+  };
+
+  const handleCopyStats = (e) => {
+    e.stopPropagation(); // Prevent sort trigger
+    if (!activeColumnStats) return;
+
+    const { columnName, type, count, mean, median, mode, min, max } = activeColumnStats;
+    
+    let text = `Column: ${columnName}\nType: ${type}\nCount (Valid): ${count}\nMean: ${mean}\nMedian: ${median}`;
+    
+    if (type === 'Date') {
+        text += `\nOldest: ${min}\nNewest: ${max}`;
+    } else {
+        text += `\nMode: ${mode}`;
+    }
+
+    // Fallback copy method for iframes/older browsers
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+            setCopiedColumn(columnName);
+            setTimeout(() => setCopiedColumn(null), 2000);
+        });
+    } else {
+        // Create hidden textarea fallback
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textArea);
+        setCopiedColumn(columnName);
+        setTimeout(() => setCopiedColumn(null), 2000);
+    }
   };
 
   // -- FILE HANDLING --
@@ -938,12 +993,24 @@ export default function DataFloor() {
 
                             {/* STATS TOOLTIP */}
                             {hoveredColumn === col && activeColumnStats && (
-                                <div className="absolute top-full left-0 mt-2 w-auto min-w-[12rem] max-w-sm bg-white p-3 rounded-lg shadow-xl border border-slate-200 z-50 text-left animate-in fade-in zoom-in-95 duration-100 pointer-events-none">
-                                    <div className="flex items-center gap-2 text-slate-500 mb-2">
-                                        <Calculator size={14} />
-                                        <h4 className="text-xs font-bold uppercase tracking-wider">
-                                            {activeColumnStats.type} Stats
-                                        </h4>
+                                <div className="absolute top-full left-0 mt-2 w-auto min-w-[12rem] max-w-sm bg-white p-3 rounded-lg shadow-xl border border-slate-200 z-50 text-left animate-in fade-in zoom-in-95 duration-100 cursor-default">
+                                    <div className="flex items-center justify-between text-slate-500 mb-2">
+                                        <div className="flex items-center gap-2">
+                                            <Calculator size={14} />
+                                            <h4 className="text-xs font-bold uppercase tracking-wider">
+                                                {activeColumnStats.type} Stats
+                                            </h4>
+                                        </div>
+                                        
+                                        {/* COPY BUTTON */}
+                                        <button
+                                            type="button"
+                                            onClick={handleCopyStats}
+                                            className="p-1 hover:bg-slate-100 rounded transition-colors text-slate-400 hover:text-indigo-600 cursor-pointer"
+                                            title="Copy stats to clipboard"
+                                        >
+                                            {copiedColumn === col ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
+                                        </button>
                                     </div>
                                     <div className="space-y-1.5 text-xs text-slate-700 whitespace-nowrap">
                                         <div className="flex justify-between gap-4 border-b border-slate-100 pb-1">
