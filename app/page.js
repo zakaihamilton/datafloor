@@ -15,6 +15,8 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   ChevronDown,
   Info,
   FileText
@@ -60,7 +62,7 @@ export default function DataFloor() {
   
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
-  const rowsPerPage = 50;
+  const [rowsPerPage, setRowsPerPage] = useState(50);
 
   // Libraries refs
   const papaRef = useRef(null);
@@ -370,6 +372,19 @@ export default function DataFloor() {
     currentPage * rowsPerPage
   );
 
+  // Handle Input Change for Page Jump
+  const handlePageInputChange = (e) => {
+    const val = e.target.value;
+    if (val === "") {
+        // allow temporarily empty
+        return; 
+    }
+    const num = Number(val);
+    if (!isNaN(num) && num >= 1 && num <= totalPages) {
+        setCurrentPage(num);
+    }
+  };
+
   const isHome = data.length === 0;
 
   return (
@@ -605,27 +620,88 @@ export default function DataFloor() {
             </div>
 
             {/* PAGINATION */}
-            <div className="bg-white border-t border-slate-200 p-3 flex items-center justify-between shadow-lg z-10">
-               <div className="text-sm text-slate-500">
-                 Showing <span className="font-medium text-slate-900">{((currentPage - 1) * rowsPerPage) + 1}</span> to <span className="font-medium text-slate-900">{Math.min(currentPage * rowsPerPage, filteredData.length)}</span> of <span className="font-medium text-slate-900">{filteredData.length}</span> results
+            <div className="bg-white border-t border-slate-200 p-3 flex flex-col sm:flex-row items-center justify-between shadow-lg z-10 gap-4 sm:gap-0">
+               {/* Left side: Rows per page + Info */}
+               <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2 text-sm text-slate-600">
+                      <span className="hidden xs:inline">Rows:</span>
+                      <select
+                          value={rowsPerPage}
+                          onChange={(e) => {
+                              setRowsPerPage(Number(e.target.value));
+                              setCurrentPage(1);
+                          }}
+                          className="border border-slate-300 rounded px-2 py-1 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                      >
+                          {[50, 100, 250, 500, 1000].map(val => (
+                              <option key={val} value={val}>{val}</option>
+                          ))}
+                      </select>
+                  </div>
+                  <div className="text-sm text-slate-500 hidden sm:block">
+                      <span className="font-medium text-slate-900">{((currentPage - 1) * rowsPerPage) + 1}</span> - <span className="font-medium text-slate-900">{Math.min(currentPage * rowsPerPage, filteredData.length)}</span> of <span className="font-medium text-slate-900">{filteredData.length}</span>
+                  </div>
                </div>
-               <div className="flex items-center gap-2">
+
+               {/* Right side: Navigation */}
+               <div className="flex items-center gap-1 sm:gap-2">
+                 <button 
+                   onClick={() => setCurrentPage(1)} 
+                   disabled={currentPage === 1}
+                   className="p-1.5 rounded-md hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed text-slate-600 transition-colors"
+                   title="First Page"
+                 >
+                   <ChevronsLeft size={18} />
+                 </button>
                  <button 
                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
                    disabled={currentPage === 1}
                    className="p-1.5 rounded-md hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed text-slate-600 transition-colors"
+                   title="Previous Page"
                  >
                    <ChevronLeft size={18} />
                  </button>
-                 <span className="text-sm font-medium text-slate-700 px-2">
-                   Page {currentPage} of {Math.max(totalPages, 1)}
+
+                 <span className="flex items-center gap-2 text-sm text-slate-600 mx-2">
+                    <span className="hidden xs:inline">Page</span>
+                    <input
+                        type="number"
+                        min="1"
+                        max={totalPages}
+                        value={currentPage}
+                        onChange={(e) => {
+                            const val = e.target.value;
+                            // Allow user to clear input while typing
+                            if (val === '') return; 
+                            const num = Number(val);
+                            if (!isNaN(num) && num >= 1 && num <= totalPages) {
+                                setCurrentPage(num);
+                            }
+                        }}
+                        // Use onBlur to handle empty state reset if needed, or keeping last valid
+                        onBlur={(e) => {
+                            if (e.target.value === '') setCurrentPage(1);
+                        }}
+                        className="w-12 sm:w-16 border border-slate-300 rounded px-1 py-1 text-center text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <span>of {totalPages}</span>
                  </span>
+
                  <button 
                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
                    disabled={currentPage === totalPages || totalPages === 0}
                    className="p-1.5 rounded-md hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed text-slate-600 transition-colors"
+                   title="Next Page"
                  >
                    <ChevronRight size={18} />
+                 </button>
+                 <button 
+                   onClick={() => setCurrentPage(totalPages)}
+                   disabled={currentPage === totalPages || totalPages === 0}
+                   className="p-1.5 rounded-md hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed text-slate-600 transition-colors"
+                   title="Last Page"
+                 >
+                   <ChevronsRight size={18} />
                  </button>
                </div>
             </div>
