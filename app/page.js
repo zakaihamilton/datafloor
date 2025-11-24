@@ -661,11 +661,9 @@ export default function DataFloor() {
                                       : <ArrowDown size={14} className="text-indigo-600" />
                                   )}
                                 </div>
-                                {emptyCellCounts[col] > 0 && (
-                                    <span className="inline-flex items-center self-start px-1.5 py-0.5 rounded text-[11px] font-medium bg-red-50 text-red-700 border border-red-100">
-                                        {emptyCellCounts[col]} empty
-                                    </span>
-                                )}
+                                <span className={`inline-flex items-center self-start px-1.5 py-0.5 rounded text-[11px] font-medium bg-red-50 text-red-700 border border-red-100 transition-opacity ${emptyCellCounts[col] > 0 ? 'opacity-100' : 'opacity-0'}`}>
+                                    {emptyCellCounts[col] > 0 ? emptyCellCounts[col] : 0} empty
+                                </span>
                             </div>
                           </th>
                         ))}
