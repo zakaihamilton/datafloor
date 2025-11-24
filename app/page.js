@@ -33,15 +33,12 @@ const loadScript = (src) => {
 
 const loadModule = async (url) => {
   try {
-    // FIX: Use 'new Function' to completely hide the import from Webpack/Next.js.
-    // This forces the browser to handle the dynamic import at runtime, preventing the
-    // "Cannot find module" build error.
     const importFn = new Function('url', 'return import(url)');
     const module = await importFn(url);
     return module;
   } catch (e) {
     console.error("Failed to load module:", url, e);
-    return null;
+    throw e;
   }
 };
 
@@ -53,6 +50,7 @@ export default function DataFloor() {
   const [fileName, setFileName] = useState("Untitled");
   const [fileType, setFileType] = useState(null); // 'csv' or 'parquet'
   const [loading, setLoading] = useState(false);
+  const [loadingMsg, setLoadingMsg] = useState("");
   const [error, setError] = useState(null);
   const [dragActive, setDragActive] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -64,9 +62,11 @@ export default function DataFloor() {
   // Libraries refs
   const papaRef = useRef(null);
   const hyparquetRef = useRef(null);
+  const arrowRef = useRef(null);
+  const parquetWasmRef = useRef(null);
 
   useEffect(() => {
-    // Initialize Libraries
+    // Initialize Reader Libraries (Lightweight)
     const init = async () => {
       try {
         // Load PapaParse for CSV
@@ -74,7 +74,6 @@ export default function DataFloor() {
         papaRef.current = window.Papa;
 
         // Load HyParquet for Parquet Reading
-        // Using +esm ensures we get the ES Module version
         const hyparquet = await loadModule('https://cdn.jsdelivr.net/npm/hyparquet/+esm');
         hyparquetRef.current = hyparquet;
         
@@ -90,6 +89,7 @@ export default function DataFloor() {
 
   const handleFileUpload = async (file) => {
     setLoading(true);
+    setLoadingMsg("Parsing file...");
     setError(null);
     setFileName(file.name);
     
@@ -138,18 +138,16 @@ export default function DataFloor() {
     try {
       const arrayBuffer = await file.arrayBuffer();
       
-      // Use hyparquet to read the file
       await hyparquetRef.current.parquetRead({
         file: arrayBuffer,
         rowFormat: 'object',
         onComplete: (rows) => {
           if (rows.length > 0) {
-            // Extract columns from the first row
             const firstRow = rows[0];
             const cols = Object.keys(firstRow);
             setColumns(cols);
             
-            // Sanitize rows (convert objects/arrays to strings for display)
+            // Sanitize rows
             const sanitizedRows = rows.map(row => {
                const newRow = {};
                cols.forEach(col => {
@@ -194,15 +192,74 @@ export default function DataFloor() {
     downloadFile(csv, fileName.replace(/\.[^/.]+$/, "") + "_exported.csv", 'text/csv');
   };
 
-  const exportParquet = () => {
-    const confirm = window.confirm(
-      "Client-side Parquet encoding is experimental and requires WebAssembly.\n\n" +
-      "If this fails, would you like to download as JSON instead? (JSON is widely compatible with Parquet tools)"
-    );
+  const exportParquet = async () => {
+    setLoading(true);
+    setLoadingMsg("Loading Parquet Writer (WASM)...");
 
-    if (confirm) {
-      const jsonStr = JSON.stringify(data, null, 2);
-      downloadFile(jsonStr, fileName.replace(/\.[^/.]+$/, "") + "_exported.json", 'application/json');
+    try {
+      // 1. Lazy load writer libraries
+      if (!arrowRef.current) {
+         arrowRef.current = await loadModule('https://cdn.jsdelivr.net/npm/apache-arrow@13.0.0/+esm');
+      }
+      
+      if (!parquetWasmRef.current) {
+        const wasmModule = await loadModule('https://cdn.jsdelivr.net/npm/parquet-wasm@0.6.1/esm/parquet_wasm.js');
+        await wasmModule.default('https://cdn.jsdelivr.net/npm/parquet-wasm@0.6.1/esm/parquet_wasm_bg.wasm');
+        parquetWasmRef.current = wasmModule;
+      }
+
+      setLoadingMsg("Converting Data...");
+      const Arrow = arrowRef.current;
+      const Parquet = parquetWasmRef.current;
+      
+      // 2. Build Arrow Table (JS Memory)
+      const arrowColumns = {};
+      columns.forEach(colName => {
+        const colValues = data.map(row => {
+          const val = row[colName];
+          return val === undefined || val === null ? null : String(val);
+        });
+        arrowColumns[colName] = Arrow.vectorFromArray(colValues, new Arrow.Utf8);
+      });
+
+      const jsTable = new Arrow.Table(arrowColumns);
+
+      // 3. Serialize to IPC Stream (Bridge to WASM)
+      const ipcStream = Arrow.tableToIPC(jsTable, 'stream');
+
+      // 4. Load into Parquet-WASM (WASM Memory)
+      setLoadingMsg("Compressing...");
+      let wasmTable;
+      try {
+        wasmTable = Parquet.Table.fromIPCStream(ipcStream);
+      } catch (e) {
+        throw new Error("Failed to create WASM Table from data: " + e.message);
+      }
+
+      // 5. Write Parquet
+      // Note: writeParquet consumes the wasmTable (takes ownership), 
+      // so the table is automatically freed after this call.
+      const parquetUint8Array = Parquet.writeParquet(wasmTable);
+
+      // 6. Download
+      downloadFile(parquetUint8Array, fileName.replace(/\.[^/.]+$/, "") + "_exported.parquet", 'application/vnd.apache.parquet');
+      
+      setLoading(false);
+
+    } catch (err) {
+      console.error("Parquet Export Failed:", err);
+      
+      const useJson = window.confirm(
+        "Parquet export failed.\n\n" + 
+        "Error: " + err.message + "\n\n" +
+        "Download as JSON instead?"
+      );
+      
+      if (useJson) {
+        const jsonStr = JSON.stringify(data, null, 2);
+        downloadFile(jsonStr, fileName.replace(/\.[^/.]+$/, "") + "_exported.json", 'application/json');
+      }
+      setLoading(false);
     }
   };
 
@@ -278,7 +335,8 @@ export default function DataFloor() {
 
              <button 
                onClick={exportCSV}
-               className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-md text-sm font-medium transition-colors"
+               disabled={loading}
+               className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-md text-sm font-medium transition-colors disabled:opacity-50"
              >
                <Download size={16} />
                Export CSV
@@ -286,7 +344,8 @@ export default function DataFloor() {
              
              <button 
                onClick={exportParquet}
-               className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm font-medium transition-colors shadow-sm"
+               disabled={loading}
+               className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm font-medium transition-colors shadow-sm disabled:opacity-50"
              >
                <ArrowRightLeft size={16} />
                Export Parquet
@@ -310,7 +369,7 @@ export default function DataFloor() {
             {loading ? (
               <div className="flex flex-col items-center animate-pulse">
                 <div className="h-12 w-12 rounded-full border-4 border-indigo-200 border-t-indigo-600 animate-spin mb-4"></div>
-                <p className="text-lg font-medium text-slate-600">Processing Data...</p>
+                <p className="text-lg font-medium text-slate-600">{loadingMsg}</p>
                 <p className="text-sm text-slate-400">Large Parquet files may take a moment</p>
               </div>
             ) : (
@@ -360,6 +419,15 @@ export default function DataFloor() {
         ) : (
           /* DATA GRID VIEW */
           <div className="h-full flex flex-col">
+            
+            {/* OVERLAY LOADING SPINNER (FOR EXPORTS) */}
+            {loading && (
+              <div className="absolute inset-0 z-50 bg-white/80 backdrop-blur-sm flex items-center justify-center flex-col">
+                 <div className="h-12 w-12 rounded-full border-4 border-indigo-200 border-t-indigo-600 animate-spin mb-4"></div>
+                 <p className="text-lg font-bold text-slate-800">{loadingMsg}</p>
+              </div>
+            )}
+
             {/* TOOLBAR */}
             <div className="bg-white border-b border-slate-200 p-4 flex items-center justify-between gap-4">
                <div className="relative flex-1 max-w-md">
