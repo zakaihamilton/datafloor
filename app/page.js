@@ -87,6 +87,19 @@ export default function DataFloor() {
     init();
   }, []);
 
+  // -- APP ACTIONS --
+
+  const resetApp = () => {
+    // Logic to return to the starting page
+    setData([]);
+    setColumns([]);
+    setFileName("Untitled");
+    setFileType(null);
+    setSearchTerm("");
+    setCurrentPage(1);
+    setError(null);
+  };
+
   // -- FILE HANDLING --
 
   const handleFileUpload = async (file) => {
@@ -148,7 +161,6 @@ export default function DataFloor() {
       }
 
       if (jsonData.length > 0) {
-        // Scan first 100 rows to discover all potential columns (keys might be missing in some objects)
         const allKeys = new Set();
         const sampleSize = Math.min(jsonData.length, 100);
         
@@ -162,7 +174,6 @@ export default function DataFloor() {
         const cols = Array.from(allKeys);
         setColumns(cols);
 
-        // Sanitize rows
         const sanitizedRows = jsonData.map(row => {
            const newRow = {};
            cols.forEach(col => {
@@ -170,7 +181,6 @@ export default function DataFloor() {
              if (typeof val === 'object' && val !== null) {
                val = JSON.stringify(val);
              }
-             // Ensure undefined/null values are empty strings for grid consistency
              newRow[col] = (val === undefined || val === null) ? '' : val;
            });
            return newRow;
@@ -204,7 +214,6 @@ export default function DataFloor() {
             const cols = Object.keys(firstRow);
             setColumns(cols);
             
-            // Sanitize rows
             const sanitizedRows = rows.map(row => {
                const newRow = {};
                cols.forEach(col => {
@@ -262,7 +271,6 @@ export default function DataFloor() {
     setLoadingMsg("Loading Parquet Writer (WASM)...");
 
     try {
-      // 1. Lazy load writer libraries
       if (!arrowRef.current) {
          arrowRef.current = await loadModule('https://cdn.jsdelivr.net/npm/apache-arrow@13.0.0/+esm');
       }
@@ -277,7 +285,6 @@ export default function DataFloor() {
       const Arrow = arrowRef.current;
       const Parquet = parquetWasmRef.current;
       
-      // 2. Build Arrow Table (JS Memory)
       const arrowColumns = {};
       columns.forEach(colName => {
         const colValues = data.map(row => {
@@ -288,11 +295,8 @@ export default function DataFloor() {
       });
 
       const jsTable = new Arrow.Table(arrowColumns);
-
-      // 3. Serialize to IPC Stream (Bridge to WASM)
       const ipcStream = Arrow.tableToIPC(jsTable, 'stream');
 
-      // 4. Load into Parquet-WASM (WASM Memory)
       setLoadingMsg("Compressing...");
       let wasmTable;
       try {
@@ -301,25 +305,18 @@ export default function DataFloor() {
         throw new Error("Failed to create WASM Table from data: " + e.message);
       }
 
-      // 5. Write Parquet
-      // Note: writeParquet consumes the wasmTable (takes ownership), 
-      // so the table is automatically freed after this call.
       const parquetUint8Array = Parquet.writeParquet(wasmTable);
-
-      // 6. Download
       downloadFile(parquetUint8Array, fileName.replace(/\.[^/.]+$/, "") + "_exported.parquet", 'application/vnd.apache.parquet');
       
       setLoading(false);
 
     } catch (err) {
       console.error("Parquet Export Failed:", err);
-      
       const useJson = window.confirm(
         "Parquet export failed.\n\n" + 
         "Error: " + err.message + "\n\n" +
         "Download as JSON instead?"
       );
-      
       if (useJson) {
         const jsonStr = JSON.stringify(data, null, 2);
         downloadFile(jsonStr, fileName.replace(/\.[^/.]+$/, "") + "_exported.json", 'application/json');
@@ -377,12 +374,16 @@ export default function DataFloor() {
       
       {/* HEADER */}
       <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between shadow-sm z-20 relative">
-        <div className="flex items-center gap-3">
-          <div className="bg-indigo-600 p-2 rounded-lg text-white">
+        <div 
+          className="flex items-center gap-3 cursor-pointer group transition-transform active:scale-95"
+          onClick={resetApp}
+          title="Return to Home"
+        >
+          <div className="bg-indigo-600 p-2 rounded-lg text-white group-hover:bg-indigo-700 transition-colors">
             <Database size={24} />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-slate-900 tracking-tight">DataFloor</h1>
+            <h1 className="text-xl font-bold text-slate-900 tracking-tight group-hover:text-indigo-600 transition-colors">DataFloor</h1>
             <p className="text-xs text-slate-500 font-medium">Parquet, JSON and CSV Converter & Editor</p>
           </div>
         </div>
@@ -534,19 +535,7 @@ export default function DataFloor() {
                </div>
 
                <div className="flex items-center gap-2">
-                 <button 
-                   onClick={() => {
-                     setData([]);
-                     setColumns([]);
-                     setFileName("Untitled");
-                     setFileType(null);
-                     setSearchTerm("");
-                   }}
-                   className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                   title="Clear Data"
-                 >
-                   <Trash2 size={18} />
-                 </button>
+                 {/* Trash Icon Removed */}
                </div>
             </div>
 
