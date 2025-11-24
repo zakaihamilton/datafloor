@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { 
   FileSpreadsheet, 
   Upload, 
@@ -19,7 +19,9 @@ import {
   ChevronsRight,
   ChevronDown,
   Info,
-  FileText
+  FileText,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 
 // -- EXTERNAL LIBRARIES VIA CDN INJECTION --
@@ -60,9 +62,10 @@ export default function DataFloor() {
   const [searchTerm, setSearchTerm] = useState("");
   const [showExportMenu, setShowExportMenu] = useState(false);
   
-  // Pagination State
+  // Pagination & Sort State
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(50);
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
 
   // Libraries refs
   const papaRef = useRef(null);
@@ -100,7 +103,25 @@ export default function DataFloor() {
     setFileType(null);
     setSearchTerm("");
     setCurrentPage(1);
+    setSortConfig({ key: null, direction: 'asc' });
     setError(null);
+  };
+
+  const handleSort = (key) => {
+    let direction = 'asc';
+    let newKey = key;
+
+    if (sortConfig.key === key) {
+      if (sortConfig.direction === 'asc') {
+        direction = 'desc';
+      } else if (sortConfig.direction === 'desc') {
+        // Third click: remove sorting
+        newKey = null;
+        direction = 'asc'; // Reset direction default
+      }
+    }
+    
+    setSortConfig({ key: newKey, direction });
   };
 
   // -- FILE HANDLING --
@@ -360,14 +381,50 @@ export default function DataFloor() {
 
   // -- RENDER LOGIC --
 
-  const filteredData = data.filter(row => 
-    Object.values(row).some(val => 
-      String(val).toLowerCase().includes(searchTerm.toLowerCase())
-    )
-  );
+  // 1. Filter Data
+  const filteredData = useMemo(() => {
+    return data.filter(row => 
+      Object.values(row).some(val => 
+        String(val).toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    );
+  }, [data, searchTerm]);
 
-  const totalPages = Math.ceil(filteredData.length / rowsPerPage);
-  const currentRows = filteredData.slice(
+  // 2. Sort Data
+  const sortedData = useMemo(() => {
+    let sortableItems = [...filteredData];
+    if (sortConfig.key !== null) {
+      sortableItems.sort((a, b) => {
+        let aValue = a[sortConfig.key];
+        let bValue = b[sortConfig.key];
+
+        // Try simple numeric detection
+        const aNum = Number(aValue);
+        const bNum = Number(bValue);
+
+        if (!isNaN(aNum) && !isNaN(bNum) && aValue !== '' && bValue !== '') {
+            aValue = aNum;
+            bValue = bNum;
+        } else {
+            // Fallback to string comparison (case insensitive)
+            aValue = String(aValue).toLowerCase();
+            bValue = String(bValue).toLowerCase();
+        }
+
+        if (aValue < bValue) {
+          return sortConfig.direction === 'asc' ? -1 : 1;
+        }
+        if (aValue > bValue) {
+          return sortConfig.direction === 'asc' ? 1 : -1;
+        }
+        return 0;
+      });
+    }
+    return sortableItems;
+  }, [filteredData, sortConfig]);
+
+  const totalPages = Math.ceil(sortedData.length / rowsPerPage);
+  const currentRows = sortedData.slice(
     (currentPage - 1) * rowsPerPage,
     currentPage * rowsPerPage
   );
@@ -573,10 +630,16 @@ export default function DataFloor() {
                           <th 
                             key={col} 
                             scope="col" 
-                            className="px-6 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap bg-slate-50 border-r border-slate-200/60"
+                            onClick={() => handleSort(col)}
+                            className="px-6 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap bg-slate-50 border-r border-slate-200/60 cursor-pointer hover:bg-slate-100 transition-colors select-none"
                           >
                             <div className="flex items-center gap-2">
                               {col}
+                              {sortConfig.key === col && (
+                                sortConfig.direction === 'asc' 
+                                  ? <ArrowUp size={14} className="text-indigo-600" />
+                                  : <ArrowDown size={14} className="text-indigo-600" />
+                              )}
                             </div>
                           </th>
                         ))}
@@ -584,11 +647,12 @@ export default function DataFloor() {
                     </thead>
                     <tbody className="bg-white divide-y divide-slate-100">
                       {currentRows.map((row, rIdx) => {
-                        const globalIndex = (currentPage - 1) * rowsPerPage + rIdx + 1;
+                        // Calculate the absolute index in the sorted array to update state correctly
+                        const globalIndex = (currentPage - 1) * rowsPerPage + rIdx;
                         return (
                           <tr key={rIdx} className="hover:bg-slate-50 group transition-colors">
                             <td className="px-4 py-3 whitespace-nowrap text-xs text-slate-400 font-mono bg-slate-50/50 border-r border-slate-100">
-                              {globalIndex}
+                              {globalIndex + 1}
                             </td>
                             {columns.map((col, cIdx) => (
                               <td 
@@ -599,7 +663,19 @@ export default function DataFloor() {
                                   type="text"
                                   className="w-full h-full px-6 py-3 bg-transparent border-none focus:ring-2 focus:ring-indigo-500 focus:bg-white text-sm text-slate-700 outline-none truncate"
                                   value={row[col] || ''}
-                                  onChange={(e) => updateCell(rIdx, col, e.target.value)}
+                                  // Updating logic needs to find original index in 'data' array
+                                  // For simplicity in this demo, we update filtered/sorted view,
+                                  // but a real app would need a stable ID to map back to 'data'.
+                                  // Here we search 'data' for the object reference.
+                                  onChange={(e) => {
+                                      const newValue = e.target.value;
+                                      const rowIndexInData = data.indexOf(row);
+                                      if (rowIndexInData > -1) {
+                                          const newData = [...data];
+                                          newData[rowIndexInData] = { ...newData[rowIndexInData], [col]: newValue };
+                                          setData(newData);
+                                      }
+                                  }}
                                 />
                               </td>
                             ))}
