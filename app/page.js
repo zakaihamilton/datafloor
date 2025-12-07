@@ -1,11 +1,10 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   FileSpreadsheet, 
   Upload, 
   Download, 
-  FileType, 
   AlertCircle,
   Database,
   ArrowRightLeft,
@@ -43,10 +42,10 @@ const loadScript = (src) => {
 
 const loadModule = async (url) => {
   try {
-    // eslint-disable-next-line no-new-func
+
     const importFn = new Function('url', 'return import(url)');
-    const module = await importFn(url);
-    return module;
+    const loadedModule = await importFn(url);
+    return loadedModule;
   } catch (e) {
     console.error("Failed to load module:", url, e);
     throw e;
@@ -568,8 +567,8 @@ export default function DataFloor() {
       let wasmTable;
       try {
         wasmTable = Parquet.Table.fromIPCStream(ipcStream);
-      } catch (e) {
-        throw new Error("Failed to create WASM Table from data: " + e.message);
+      } catch (err) {
+        throw new Error("Failed to create WASM Table from data: " + err.message);
       }
 
       const parquetUint8Array = Parquet.writeParquet(wasmTable);
@@ -593,7 +592,7 @@ export default function DataFloor() {
   };
 
   // -- EDITING --
-
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const updateCell = (rowIndex, col, value) => {
     const realIndex = (currentPage - 1) * rowsPerPage + rowIndex;
     const newData = [...data];
@@ -740,7 +739,7 @@ export default function DataFloor() {
                        onClick={exportJSON}
                        className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 hover:text-indigo-600 flex items-center gap-2"
                      >
-                       <div className="w-4 h-4 flex items-center justify-center font-mono text-[10px] border border-current rounded">{'{}'}</div>
+                       <div className="w-4 h-4 flex items-center justify-center font-mono text-[10px] border border-current rounded">{'{'}{'}'}</div>
                        JSON (.json)
                      </button>
                      {/* CUSTOM EXPORT OPTION */}
@@ -896,7 +895,7 @@ export default function DataFloor() {
                     Custom Import Options?
                   </button>
                   <p className="text-xs text-slate-400 max-w-xs">
-                    Tip: Select any file type. If the extension is unknown, you'll see options to configure delimiters.
+                    Tip: Select any file type. If the extension is unknown, you&apos;ll see options to configure delimiters.
                   </p>
                 </div>
 
